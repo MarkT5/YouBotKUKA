@@ -1,4 +1,5 @@
 [pypi]
 repository: https://pypi.python.org/pypi
+repository: https://pypi.python.org/simple
 username: ZaSKaR
 password: TibetCode04042002
