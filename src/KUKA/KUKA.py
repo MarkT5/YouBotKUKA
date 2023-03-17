@@ -1,5 +1,3 @@
-__version__ = "1.0.0"
-
 import io
 import math
 import socket
@@ -11,7 +9,7 @@ import numpy as np
 import paramiko
 from PIL import Image
 from mjpeg.client import MJPEGClient
-from SSH import SSH
+from .SSH import SSH
 
 deb = True
 
