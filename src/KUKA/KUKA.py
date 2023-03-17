@@ -11,6 +11,7 @@ import numpy as np
 import paramiko
 from PIL import Image
 from mjpeg.client import MJPEGClient
+from SSH import SSH
 
 deb = True
 
@@ -69,7 +70,7 @@ class YouBot:
         if advanced:
             debug("WARNING!!! ADVANCED MODE ENABLED, ALL SAFETY CHECKS ARE SUSPENDED")
 
-        self.ssh_client = paramiko.SSHClient()
+
         self.threads_number = 0
         self.main_thr = thr.main_thread()
         self.camera_enable = camera_enable
@@ -131,11 +132,16 @@ class YouBot:
             self.connected = False
             return
 
+
         # connection
         debug(f"connecting to {ip}")
 
-        if not advanced or ros:
-            self.check_active_nodes_via_ssh(force_restart=ros, password=pwd)
+        self.ssh = SSH(user='youbot', ip=ip, password=pwd)
+
+        if not advanced:
+            ros_ssh, _, _ = self.ssh.ROS_status()
+        if not ros_ssh or ros:
+            self.ssh.launch_ROS()
 
         if self.connected:
             debug("connecting to control channel")
@@ -200,132 +206,7 @@ class YouBot:
         self.threads_number += 1
         self.cam_depth_thr.start()
 
-    def check_active_nodes_via_ssh(self, /, user='youbot', password='111111', force_restart=False):
-        """
-        Connects to KUKA youbot via SSH client and checks rostopics
-        :param user: youbot by default
-        :param password: 111111 by default
-        """
-        port = 22
-        rostopic = ''
-        if not password:
-            password = "111111"
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        if self.ip[-1] == "1":
-            password = "111111"
-        elif self.ip[-1] == "2":
-            password = "112233"
-        elif self.ip[-1] == "3":
-            password = "0987654321"
-        elif self.ip[-1] == "4":
-            password = "112233"
-        elif self.ip[-1] == "5":
-            password = "111111"
-        debug("ROS status check...")
-        try:
-            client.connect(hostname=self.ip, username=user, password=password, port=port)
-        except Exception as err:
-            debug(err)
-            self.connected = False
-            self.camera_enable = False
-            self.read_depth = False
-            return
 
-        ssh = client.invoke_shell()
-        time.sleep(0.1)
-        ssh.send(b"sudo -s\n")
-        time.sleep(0.1)
-        ssh.send(password.encode("utf-8") + b"\n")
-        if force_restart:
-            debug("ROS force restart")
-            self.connect_ssh()
-        else:
-            time.sleep(0.1)
-            msg = ssh.recv(10000).decode("utf-8")
-            while not msg.count("root@youbot:"):
-                msg += ssh.recv(1).decode("utf-8")
-            ssh.send(b"rostopic list\n")
-            rostopic = ssh.recv(10000).decode("utf-8")
-            while not rostopic.count("root@youbot:"):
-                rostopic += ssh.recv(1).decode("utf-8")
-            if rostopic.count("ERROR: Unable"):
-                debug("ROS not running")
-                rostopic = ''
-                self.connect_ssh()
-
-        if rostopic == '':
-            ssh.send(b"rostopic list\n")
-        while not rostopic.count("root@youbot:"):
-            rostopic += ssh.recv(1).decode("utf-8")
-        if self.camera_enable:
-            if rostopic.count("camera/rgb/image_raw"):
-                debug("RGB camera is active")
-            else:
-                debug("WARN: RGB camera is inactive")
-                self.camera_enable = False
-            if self.read_depth:
-                if rostopic.count("camera/depth/image"):
-                    debug("depth camera is active")
-                else:
-                    debug("WARN: depth camera is inactive")
-                    self.read_depth = False
-
-    def connect_ssh(self, /, user='youbot', password='111111'):
-        """
-        Connects to KUKA youbot via SSH client and starts ROS
-        :param user: youbot by default
-        :param password: 111111 by default
-        """
-        port = 22
-
-        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        if self.ip[-1] == "1":
-            password = "111111"
-        elif self.ip[-1] == "3":
-            password = "0987654321"
-        elif self.ip[-1] == "4":
-            password = "112233"
-        elif self.ip[-1] == "5":
-            password = "111111"
-        elif self.ip[-1] == "2":
-            password = "111111"
-        try:
-            self.ssh_client.connect(hostname=self.ip, username=user, password=password, port=port)
-        except Exception as err:
-            debug(err)
-            self.connected = False
-            return
-        ssh = self.ssh_client.invoke_shell()
-        time.sleep(0.5)
-        debug("log as root")
-        ssh.send(b"sudo -s\n")
-        time.sleep(0.5)
-        ssh.send(password.encode("utf-8") + b"\n")
-        debug("cleaning screen...")
-        time.sleep(1)
-        ssh.send(b"pkill screen\n")
-        time.sleep(0.5)
-        ssh.send(b"screen -S roslaunch\n")
-        debug("roslaunch screen created")
-        time.sleep(0.5)
-        ssh.send(b"roslaunch youbot_tl_test ytl_2arm.launch\n")
-        ssh_msg = ""
-
-        debug("waiting ros to start...")
-        for i in range(10000):
-            ssh_msg += ssh.recv(1).decode("utf-8")
-            if ssh_msg.count("System has"):
-                debug("ros started")
-                ssh_msg += ssh.recv(20).decode("utf-8")
-                if ssh_msg.count("System has 0"):
-                    debug("WARN: no arms connected")
-                time.sleep(1)
-                self.ssh_client.close()
-                break
-
-        self.ssh_client.close()
-        time.sleep(0.5)
 
     # receiving and parsing sensor data
 
@@ -590,6 +471,18 @@ class YouBot:
 
     @property
     def lidar(self):
+        """
+        Acquires variable data lock and reads lidar data
+        :return: lidar data
+        """
+        self.data_lock.acquire()
+        out = self.lidar_data
+        inc = self.increment_data_lidar
+        self.data_lock.release()
+        return inc, out
+
+    @property
+    def lidar_wheels(self):
         """
         Acquires variable data lock and reads lidar data
         :return: lidar data
@@ -975,3 +868,9 @@ class YouBot:
             self.conn.shutdown(socket.SHUT_RDWR)
             self.conn.close()
             debug(f"robot {self.ip} disconnected")
+
+
+if __name__ == "__main__":
+    robot = YouBot('192.168.88.21', ros=False, offline=False, camera_enable=True, advanced=False)
+    print(robot.ssh.send_wait("echo 123", "root"))
+    time.sleep(1)
