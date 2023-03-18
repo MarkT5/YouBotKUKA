@@ -10,28 +10,7 @@ import paramiko
 from PIL import Image
 from mjpeg.client import MJPEGClient
 from .SSH import SSH
-
-deb = True
-
-
-def debug(inf, /, end="\n"):
-    """
-    Prints info if variable deb is True
-    :param inf: info to print
-    """
-    if deb:
-        print(inf, end=end)
-
-
-def range_cut(mi, ma, val):
-    """
-    Cuts value from min to max
-    :param mi: minimum value
-    :param ma: maximum value
-    :param val: value
-    :return: cut value
-    """
-    return min(ma, max(mi, val))
+from .service import debug, range_cut
 
 
 class YouBot:
@@ -41,6 +20,7 @@ class YouBot:
 
     def __init__(self, ip, /,
                  pwd=None,
+                 ssh=True,
                  ros=False,
                  offline=False,
                  read_depth=True,
@@ -55,20 +35,20 @@ class YouBot:
         Establishes connection with control and sensor socket\n
         Starts sending commands thread\n
         Starts reading sensors data thread
-        :param ip: robot ip
-        :param pwd: password for ssh connection
-        :param ros: force restart of youbot_tl_test on KUKA if true
-        :param offline: toggles offline mode (doesn't try to connect to robot)
-        :param read_depth: if false doesn't start depth client
-        :param camera_enable: enables mjpeg client if True
-        :param advanced: disables all safety checks in the sake of time saving
-        :param log: if [path, freq] logs odometry and lidar data to set path with set frequency
-        :param read_from_log: if [path, freq] streams odometry and lidar data from set log path with set frequency
+        :param ip (str): robot ip
+        :param pwd (str): password for ssh connection
+        :param ssh (bool): whether to connect to SSH or not
+        :param ros (bool): force restart of youbot_tl_test on KUKA if true
+        :param offline (bool): toggles offline mode (doesn't try to connect to robot)
+        :param read_depth (bool): if false doesn't start depth client
+        :param camera_enable (bool): enables mjpeg client if True
+        :param advanced (bool): disables all safety checks in the sake of time saving
+        :param log [(str), (int)]: if [path, freq] logs odometry and lidar data to set path with set frequency
+        :param read_from_log [(str), (int)]: if [path, freq] streams odometry and lidar data from set log path with set frequency
         """
         if advanced:
             debug("WARNING!!! ADVANCED MODE ENABLED, ALL SAFETY CHECKS ARE SUSPENDED")
-
-
+        debug("Copyright \x1b[91m©\x1b[39m 2023 \x1b[92mZaSKaR\x1b[39m (\x1b[4mTurkov Mark\x1b[24m, RTU MIREA)")
         self.threads_number = 0
         self.main_thr = thr.main_thread()
         self.camera_enable = camera_enable
@@ -130,31 +110,36 @@ class YouBot:
             self.connected = False
             return
 
-
         # connection
         debug(f"connecting to {ip}")
-
-        self.ssh = SSH(user='youbot', ip=ip, password=pwd)
-
-        if not advanced:
-            ros_ssh, _, _ = self.ssh.ROS_status()
-        if not ros_ssh or ros:
-            self.ssh.launch_ROS()
+        self.ssh = SSH(user='youbot', ip=ip, password=pwd, connect=ssh)
+        if self.ssh.connected:
+            ros_ssh = False
+            if not advanced:
+                ros_ssh, _, _ = self.ssh.ROS_status()
+            if not ros_ssh or ros:
+                self.ssh.launch_ROS()
+        elif ssh:
+            debug("unable to connect to SSH")
 
         if self.connected:
             debug("connecting to control channel")
             # init socket
-            self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.conn.settimeout(2)
-            self.conn.connect((self.ip, 7777))
-            # init reading thread
-            self.data_thr = thr.Thread(target=self._receive_data, args=())
-            self.send_thr = thr.Thread(target=self.send_data, args=())
-            time.sleep(1)
-            self.data_thr.start()
-            self.send_thr.start()
-            self.threads_number += 2
-            debug("connected to 7777 (data stream)")
+            try:
+                self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.conn.settimeout(5)
+                self.conn.connect((self.ip, 7777))
+                # init reading thread
+                self.data_thr = thr.Thread(target=self._receive_data, args=())
+                self.send_thr = thr.Thread(target=self.send_data, args=())
+                time.sleep(1)
+                self.data_thr.start()
+                self.send_thr.start()
+                self.threads_number += 2
+                debug("connected to 7777 (data stream)")
+            except(TimeoutError):
+                self.connected = False
+                debug("unable to connect to video stream")
 
         # connecting to video server
         if self.connected and self.camera_enable:
@@ -203,8 +188,6 @@ class YouBot:
         self.cam_depth_thr = thr.Thread(target=self.get_frame_depth, args=())
         self.threads_number += 1
         self.cam_depth_thr.start()
-
-
 
     # receiving and parsing sensor data
 
@@ -471,7 +454,7 @@ class YouBot:
     def lidar(self):
         """
         Acquires variable data lock and reads lidar data
-        :return: lidar data
+        :return [float[3], float[lidar_resolution]]: [increment, lidar ranges] lidar data
         """
         self.data_lock.acquire()
         out = self.lidar_data
@@ -859,13 +842,16 @@ class YouBot:
         Disconnects from robot
         """
         if self.connected:
-            self.connected = False
-            self.move_base()
-            self.move_arm(0, 56, -80, -90, 0, 2)
-            time.sleep(1)
-            self.conn.shutdown(socket.SHUT_RDWR)
-            self.conn.close()
-            debug(f"robot {self.ip} disconnected")
+            try:
+                self.connected = False
+                self.move_base()
+                self.move_arm(0, 56, -80, -90, 0, 2)
+                time.sleep(1)
+                self.conn.shutdown(socket.SHUT_RDWR)
+                self.conn.close()
+                debug(f"robot {self.ip} disconnected")
+            except:
+                pass
 
 
 if __name__ == "__main__":

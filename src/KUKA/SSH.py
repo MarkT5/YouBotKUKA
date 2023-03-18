@@ -1,6 +1,6 @@
 import paramiko
 import time
-#from KUKA import debug
+from .service import debug
 
 available_pwds = {"1": "111111", "2": "111111", "3": "0987654321", "4": "112233", "5": "111111"}
 
@@ -10,18 +10,10 @@ class SshNotConnected(Exception):
     """
     pass
 
-deb=True
-def debug(inf, /, end="\n"):
-    """
-    Prints info if variable deb is True
-    :param inf: info to print
-    """
-    if deb:
-        print(inf, end=end)
 
 
 class SSH:
-    def __init__(self, /, user='youbot', ip="192.168.88.21", password=None, timeout=3):
+    def __init__(self, /, user='youbot', ip="192.168.88.21", password=None, timeout=3, connect=True):
         """
         Connects to KUKA youbot via SSH client and starts ROS
         :param user: youbot by default
@@ -30,12 +22,14 @@ class SSH:
         """
         port = 22
         self.timeout = timeout
-        self.connected = True
+        self.connected = connect
         self.ssh_client = paramiko.SSHClient()
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.last_status = {"ROS": -1, "RGB": -1, "depth": -1, "arm0": -1, "arm1": -1, "lidar": -1, "base": -1}
         if not password and ip[-1] in available_pwds:
             password = available_pwds[ip[-1]]
+        if not self.connected:
+            return
         try:
             debug("connecting to SSH")
             self.ssh_client.connect(hostname=ip, username=user, password=password, port=port)
@@ -91,6 +85,8 @@ class SSH:
         '''
         self.ssh_var.send(msg.encode("utf-8") + b"\n")
 
+    def send_recv(self, msg):
+        return self.send_wait(msg, "root@youbot:")[:-12]
 
     def ROS_status(self, verbose=1):
         """
@@ -184,9 +180,6 @@ class SSH:
                 else:
                     prev = False
         debug('\r')
-
-    def __del__(self):
-        self.ssh_client.close()
 
 
 if __name__ == "__main__":
