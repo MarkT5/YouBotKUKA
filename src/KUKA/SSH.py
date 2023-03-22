@@ -104,7 +104,7 @@ class SSH:
             if verbose:
                 debug("ROS not running")
             self.last_status['ROS'] = 0
-            return
+            return False, False, False
         else:
             ROS = True
             self.last_status['ROS'] = 1
@@ -186,3 +186,4 @@ if __name__ == "__main__":
     test_client = SSH(ip="192.168.88.21")
     test_client.launch_ROS(verbose=1)
     test_client.ROS_status()
+

@@ -88,8 +88,8 @@ class YouBot:
 
         # sensor data
         self.lidar_data = None
-        self.increment_data_lidar = None  # the closest to lidar read increment value
-        self.increment_data = None
+        self.increment_data_lidar = [0,0,0]  # the closest to lidar read increment value
+        self.increment_data = [0,0,0]
         self.corr_arm_pos = [None, None]
         self.wheels_data = None
         self.wheels_data_lidar = None
@@ -112,34 +112,47 @@ class YouBot:
 
         # connection
         debug(f"connecting to {ip}")
+        def connect_to_control():
+            if self.connected:
+                debug("connecting to control channel")
+                # init socket
+                try:
+                    self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.conn.settimeout(5)
+                    self.conn.connect((self.ip, 7777))
+                    # init reading thread
+                    self.data_thr = thr.Thread(target=self._receive_data, args=())
+                    self.send_thr = thr.Thread(target=self.send_data, args=())
+                    time.sleep(1)
+                    self.data_thr.start()
+                    self.send_thr.start()
+                    self.threads_number += 2
+                    debug("connected to 7777 (data stream)")
+                    return 0
+                except(TimeoutError):
+                    self.connected = False
+                    debug("unable to connect to socket")
+                    return 1
+                except(ConnectionRefusedError):
+                    debug("connection refused, (re)starting ROS")
+                    return 2
+
+
+        if connect_to_control() == 2:
+            ros = True
+            ssh = True
         self.ssh = SSH(user='youbot', ip=ip, password=pwd, connect=ssh)
         if self.ssh.connected:
-            ros_ssh = False
+            ros_ssh = True
             if not advanced:
                 ros_ssh, _, _ = self.ssh.ROS_status()
             if not ros_ssh or ros:
                 self.ssh.launch_ROS()
+                self.connected = True
+                connect_to_control()
         elif ssh:
             debug("unable to connect to SSH")
 
-        if self.connected:
-            debug("connecting to control channel")
-            # init socket
-            try:
-                self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.conn.settimeout(5)
-                self.conn.connect((self.ip, 7777))
-                # init reading thread
-                self.data_thr = thr.Thread(target=self._receive_data, args=())
-                self.send_thr = thr.Thread(target=self.send_data, args=())
-                time.sleep(1)
-                self.data_thr.start()
-                self.send_thr.start()
-                self.threads_number += 2
-                debug("connected to 7777 (data stream)")
-            except(TimeoutError):
-                self.connected = False
-                debug("unable to connect to video stream")
 
         # connecting to video server
         if self.connected and self.camera_enable:
@@ -858,3 +871,4 @@ if __name__ == "__main__":
     robot = YouBot('192.168.88.21', ros=False, offline=False, camera_enable=True, advanced=False)
     print(robot.ssh.send_wait("echo 123", "root"))
     time.sleep(1)
+
