@@ -24,5 +24,5 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 [project.urls]
-"Homepage" = "https://github.com/MarkT5/KUKAyoubot_lib"
-"Bug Tracker" = "https://github.com/MarkT5/KUKAyoubot_lib/issues"
+"Homepage" = "https://github.com/MarkT5/YouBotKUKA"
+"Bug Tracker" = "https://github.com/MarkT5/YouBotKUKA/issues"
