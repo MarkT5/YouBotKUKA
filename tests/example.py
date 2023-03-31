@@ -1,7 +1,9 @@
-import time
-from src.KUKA import YouBot
+
+from KUKA import YouBot
 
 
 robot = YouBot("192.168.88.22")
-print(robot.ssh.send_recv("rostopic list"))
 
+
+robot.move_arm(0,0,0,0,0)
+time.sleep(5)
