@@ -377,12 +377,11 @@ class YouBot:
 
         data_buff_len = 0
         self.data_buff = b''
+        leftovers = b''
         while self.main_thr.is_alive():
-            if data_buff_len > 5000:
-                self.data_buff = b''
-                data_buff_len = 0
             try:
-                el = self.conn.recv(1)
+                el = self.conn.recv(4096)
+
             except TimeoutError:
                 debug("_receive_data thread died due to timeout")
                 break
@@ -392,18 +391,22 @@ class YouBot:
 
             if el != b'':
                 self.data_buff += el
-                data_buff_len += 1
-            if data_buff_len > 0 and self.data_buff[-1] == 13:
-                self.conn.recv(1)
-
                 try:
                     str_data = str(self.data_buff[:-1], encoding='utf-8')
-                    self.data_parser_tht = thr.Thread(target=self._parse_data, args=(str_data,))
-                    self.data_parser_tht.start()
-                except:
+                    last = str_data.rfind("\r")
+
+                    if last == -1:
+                        leftovers = self.data_buff[:]
+                    else:
+
+                        leftovers = str.encode(str_data[last+4:])
+                        str_data = str_data[:last]
+                        self._parse_data(str_data[:str_data.find("\r")])
+
+                except Exception as e:
+                    debug(e)
                     pass
-                self.data_buff = b''
-                data_buff_len = 0
+                self.data_buff = leftovers
         self.threads_number -= 1
         debug(f"_receive_data thread terminated, {self.threads_number} threads remain")
 
