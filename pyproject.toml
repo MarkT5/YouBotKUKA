@@ -16,7 +16,6 @@ dependencies = [
     "Pillow >= 9.4.0",
 ]
 description = "package for easy KUKA-youbot control"
-Home-page = "https://github.com/MarkT5/YouBotKUKA"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
