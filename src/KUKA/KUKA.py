@@ -393,16 +393,15 @@ class YouBot:
                 self.data_buff += el
                 try:
                     str_data = str(self.data_buff[:-1], encoding='utf-8')
-                    last = str_data.rfind("\r")
+                    last = str_data.rfind("\r\n")
 
                     if last == -1:
                         leftovers = self.data_buff[:]
                     else:
 
-                        leftovers = str.encode(str_data[last+4:])
+                        leftovers = str.encode(str_data[last+2:])
                         str_data = str_data[:last]
-                        self._parse_data(str_data[:str_data.find("\r")])
-
+                        self._parse_data(str_data[:str_data.find("\r\n")])
                 except Exception as e:
                     debug(e)
                     pass
