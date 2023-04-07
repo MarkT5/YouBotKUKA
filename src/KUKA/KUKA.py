@@ -90,6 +90,7 @@ class YouBot:
         self.lidar_data = None
         self.increment_data_lidar = [0,0,0]  # the closest to lidar read increment value
         self.increment_data = [0,0,0]
+        self.odom_speed_data = [0,0,0]
         self.corr_arm_pos = [None, None]
         self.wheels_data = None
         self.wheels_data_lidar = None
@@ -297,6 +298,7 @@ class YouBot:
         """
         write_lidar = None
         write_increment = None
+        write_odom_speed = None
         write_arm1 = None
         write_arm2 = None
         wheels = None
@@ -313,11 +315,19 @@ class YouBot:
                         if i != "":
                             write_lidar.append(5)
 
+
         elif data[:6] == ".odom#":
             try:
                 write_increment = list(map(float, data[6:].split(';')))
             except:
                 write_increment = None
+
+        elif data[:11] == ".odomspeed#":
+            try:
+                write_odom_speed = list(map(float, data[11:].split(';')))
+            except:
+                write_odom_speed = None
+
         elif data[:8] == ".manip0#":
             try:
                 write_arm1 = list(map(float, data[8:].split(';')))
@@ -345,6 +355,8 @@ class YouBot:
                 self.wheels_data_lidar = self.wheels_data
             if write_increment:
                 self.increment_data = write_increment
+            if write_odom_speed:
+                self.odom_speed_data = write_odom_speed
             if wheels:
                 self.wheels_data = wheels
 
@@ -392,7 +404,7 @@ class YouBot:
             if el != b'':
                 self.data_buff += el
                 try:
-                    str_data = str(self.data_buff[:-1], encoding='utf-8')
+                    str_data = str(self.data_buff, encoding='utf-8')
                     last = str_data.rfind("\r\n")
 
                     if last == -1:
@@ -401,7 +413,9 @@ class YouBot:
 
                         leftovers = str.encode(str_data[last+2:])
                         str_data = str_data[:last]
-                        self._parse_data(str_data[:str_data.find("\r\n")])
+                        splitted = str_data.split("\r\n")
+                        for i in splitted:
+                            self._parse_data(i)
                 except Exception as e:
                     debug(e)
                     pass
@@ -535,6 +549,16 @@ class YouBot:
         if self.connected:
             self.data_lock.acquire()
             out = self.increment_data
+            self.data_lock.release()
+            return out
+        else:
+            return [0, 0, 0]
+
+    @property
+    def odom_speed(self):
+        if self.connected:
+            self.data_lock.acquire()
+            out = self.odom_speed_data
             self.data_lock.release()
             return out
         else:
@@ -873,4 +897,5 @@ if __name__ == "__main__":
     robot = YouBot('192.168.88.21', ros=False, offline=False, camera_enable=True, advanced=False)
     print(robot.ssh.send_wait("echo 123", "root"))
     time.sleep(1)
+
 
