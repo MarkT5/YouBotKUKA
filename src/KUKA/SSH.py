@@ -43,7 +43,7 @@ class SSH:
         self.send_wait(password, "root@youbot:")
         debug("logged in")
 
-    def send_wait(self, msg_send, wait_msg, /, timeout=None, timeout_msg=None, verbose=0):
+    def send_wait(self, msg_send, wait_msg, /, timeout=None, timeout_msg=None, verbose=0, max_time=20):
         """
         Sends command to ssh and waits certain for response till timeout
         :param msg_send: command to send
@@ -59,6 +59,7 @@ class SSH:
         if not timeout:
             timeout = self.timeout
         init_time = time.time()
+        max_time_time = time.time()
         msg = ''
         self.ssh_var.send(msg_send.encode("utf-8") + b"\n")
         while not msg.count(wait_msg):
@@ -71,7 +72,9 @@ class SSH:
                         debug(read_char, end='')
             else:
                 time.sleep(0.001)
-            if time.time() - init_time > timeout:
+            if time.time() - max_time_time > max_time:
+                break
+            elif time.time() - init_time > timeout:
                 if timeout_msg != None:
                     debug(timeout_msg, end='')
                 else:
@@ -186,4 +189,5 @@ if __name__ == "__main__":
     test_client = SSH(ip="192.168.88.21")
     test_client.launch_ROS(verbose=1)
     test_client.ROS_status()
+
 
