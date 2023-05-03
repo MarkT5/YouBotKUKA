@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "KUKA_youbot"
 version = "0.1.2"
-authors = [
-  { name="ZaSKaR", email="mark.turkov@mail.ru" },
+authors = ["ZaSKaR <mark.turkov@mail.ru>" ,
 ]
+
 dependencies = [
     "setuptools >= 40.9.0",
     "numpy >= 1.23.0",
@@ -18,11 +18,17 @@ dependencies = [
 description = "package for easy KUKA-youbot control"
 readme = "README.md"
 requires-python = ">=3.8"
+
+[project.urls]
+"Homepage" = "https://github.com/MarkT5/YouBotKUKA"
+"Bug Tracker" = "https://github.com/MarkT5/YouBotKUKA/issues"
+
+repository = "https://github.com/MarkT5/YouBotKUKA"
+
+[tool.poetry]
+readme = "README.md"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Framework :: Robot Framework :: Tool",
     "Operating System :: OS Independent",
 ]
-[project.urls]
-"Homepage" = "https://github.com/MarkT5/YouBotKUKA"
-"Bug Tracker" = "https://github.com/MarkT5/YouBotKUKA/issues"
