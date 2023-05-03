@@ -8,9 +8,11 @@ import cv2
 import numpy as np
 import paramiko
 from PIL import Image
-from mjpeg.client import MJPEGClient
 from .SSH import SSH
-from .service import debug, range_cut
+from .service import debug, range_cut, test_MJPEG_client
+from mjpeg.client import MJPEGClient
+import urllib.request
+import mjpeg
 
 
 class YouBot:
@@ -48,9 +50,13 @@ class YouBot:
         """
         if advanced:
             debug("WARNING!!! ADVANCED MODE ENABLED, ALL SAFETY CHECKS ARE SUSPENDED")
-        debug("Copyright \x1b[91m©\x1b[39m 2023 \x1b[92mZaSKaR\x1b[39m (\x1b[4mTurkov Mark\x1b[24m, RTU MIREA)")
+
+        # threading
         self.threads_number = 0
         self.main_thr = thr.main_thread()
+        self.cam_rgb_lock = thr.Lock()
+        self.cam_depth_lock = thr.Lock()
+
         self.camera_enable = camera_enable
         self.read_depth = read_depth
         self.ip = ip
@@ -88,9 +94,10 @@ class YouBot:
 
         # sensor data
         self.lidar_data = None
-        self.increment_data_lidar = [0,0,0]  # the closest to lidar read increment value
-        self.increment_data = [0,0,0]
-        self.odom_speed_data = [0,0,0]
+        self.lidar_frame_count = 0
+        self.increment_data_lidar = [0, 0, 0]  # the closest to lidar read increment value
+        self.increment_data = [0, 0, 0]
+        self.odom_speed_data = [0, 0, 0]
         self.corr_arm_pos = [None, None]
         self.wheels_data = None
         self.wheels_data_lidar = None
@@ -113,6 +120,7 @@ class YouBot:
 
         # connection
         debug(f"connecting to {ip}")
+
         def connect_to_control():
             if self.connected:
                 debug("connecting to control channel")
@@ -137,7 +145,9 @@ class YouBot:
                 except(ConnectionRefusedError):
                     debug("connection refused, (re)starting ROS")
                     return 2
-
+                except(OSError):
+                    raise OSError(
+                        f"Can't find robot with ip {self.ip} in local network. Turn on the robot, and wait until full startup")
 
         if connect_to_control() == 2:
             ros = True
@@ -146,7 +156,7 @@ class YouBot:
         if self.ssh.connected:
             ros_ssh = True
             if not advanced:
-                ros_ssh, _, _ = self.ssh.ROS_status()
+                ros_ssh, _, _ = self.ssh.ROS_status(verbose=False)
             if not ros_ssh or ros:
                 self.ssh.launch_ROS()
                 self.connected = True
@@ -154,12 +164,14 @@ class YouBot:
         elif ssh:
             debug("unable to connect to SSH")
 
-
         # connecting to video server
         if self.connected and self.camera_enable:
             if self.read_depth:
-                self.init_depth_client()
-            self.init_rgb_client()
+                if not self.init_depth_client():
+                    self.read_depth = False
+            if not self.init_rgb_client():
+                self.camera_enable = False
+                debug("\x1b[33mWARNING camera is not connected or video server is not running\x1b[39m")
 
         # waiting for initial arm position
         if self.connected:
@@ -183,11 +195,14 @@ class YouBot:
         bufs = self.client_rgb.request_buffers(65536, 5)
         for b in bufs:
             self.client_rgb.enqueue_buffer(b)
+        if not test_MJPEG_client(self.client_rgb.url):
+            return False
+
         self.client_rgb.start()
-        self.cam_rgb_lock = thr.Lock()
         self.cam_rgb_thr = thr.Thread(target=self.get_frame_color, args=())
         self.threads_number += 1
         self.cam_rgb_thr.start()
+        return True
 
     def init_depth_client(self):
         """
@@ -197,11 +212,13 @@ class YouBot:
         bufsd = self.client_depth.request_buffers(65536, 5)
         for b in bufsd:
             self.client_depth.enqueue_buffer(b)
+        if not test_MJPEG_client(self.client_depth.url):
+            return False
         self.client_depth.start()
-        self.cam_depth_lock = thr.Lock()
         self.cam_depth_thr = thr.Thread(target=self.get_frame_depth, args=())
         self.threads_number += 1
         self.cam_depth_thr.start()
+        return True
 
     # receiving and parsing sensor data
 
@@ -349,6 +366,7 @@ class YouBot:
 
             self.data_lock.acquire()
             if write_lidar:
+                self.lidar_frame_count += 1
                 self.lidar_data = write_lidar
                 self.increment_data_lidar = self.increment_data
                 self.calculated_pos_lidar = self.calculated_pos[:]
@@ -411,7 +429,7 @@ class YouBot:
                         leftovers = self.data_buff[:]
                     else:
 
-                        leftovers = str.encode(str_data[last+2:])
+                        leftovers = str.encode(str_data[last + 2:])
                         str_data = str_data[:last]
                         splitted = str_data.split("\r\n")
                         for i in splitted:
@@ -612,9 +630,9 @@ class YouBot:
         :param s: sideways speed
         :param r: rotation speed
         """
-        f = range_cut(-1, 1, f)
-        s = range_cut(-1, 1, s)
-        r = range_cut(-1, 1, r)
+        f = round(range_cut(-1, 1, f), 3)
+        s = round(range_cut(-1, 1, s), 3)
+        r = round(range_cut(-1, 1, r), 3)
         self.post_to_send_data(0, bytes(f'/base:{f};{s};{r}^^^', encoding='utf-8'))
         self.move_speed = (f, s, r)
 
@@ -660,12 +678,20 @@ class YouBot:
 
             targ_ang = math.atan2(loc_y, loc_x)
             loc_ang = targ_ang - rob_ang
-            if dist < prec and (ang - rob_ang) < prec:
+            if dist < prec and abs(ang - rob_ang) < prec:
                 break
             fov_speed = speed * math.cos(loc_ang)
             side_speed = -speed * math.sin(loc_ang)
             total_speed = math.sqrt(fov_speed ** 2 + side_speed ** 2)
-            ang_speed = -(ang - rob_ang) / (dist / total_speed)
+            delta_ang = ang - rob_ang
+            if delta_ang > math.pi:
+                delta_ang -= 2 * math.pi
+            elif delta_ang < -math.pi:
+                delta_ang += 2 * math.pi
+            if dist / total_speed != 0:
+                ang_speed = -delta_ang / (dist / total_speed)
+            else:
+                ang_speed = -delta_ang * 0.3
             self.move_base(fov_speed, side_speed, ang_speed)
             time.sleep(1 / self.frequency)
         self.move_base(0, 0, 0)
@@ -709,21 +735,23 @@ class YouBot:
             self.arm_pos[self.arm_ID][4] = kwargs["m5"]
         if list(kwargs.keys()).count("grip") > 0:
             self.arm_pos[self.arm_ID][5] = kwargs["grip"]
-            self.post_to_send_data(2, bytes(f'/grip:{self.arm_ID};{self.arm_pos[self.arm_ID][5]}^^^', encoding='utf-8'))
+            self.post_to_send_data(2, bytes(f'/grip:{self.arm_ID};{round(self.arm_pos[self.arm_ID][5])}^^^',
+                                            encoding='utf-8'))
         if grip:
             self.arm_pos[self.arm_ID][5] = args[-1]
-            self.post_to_send_data(2, bytes(f'/grip:{self.arm_ID};{self.arm_pos[self.arm_ID][5]}^^^', encoding='utf-8'))
+            self.post_to_send_data(2, bytes(f'/grip:{self.arm_ID};{round(self.arm_pos[self.arm_ID][5])}^^^',
+                                            encoding='utf-8'))
 
         if list(kwargs.keys()).count("target") > 0:
             if len(kwargs["target"][0]) == 2:
                 m2, m3, m4, _ = self.solve_arm(kwargs["target"])
                 self.arm_pos[self.arm_ID][1:4] = m2, m3, m4
 
-        m1 = range_cut(11, 302, -self.arm_pos[self.arm_ID][0] + 168)
-        m2 = range_cut(3, 150, -self.arm_pos[self.arm_ID][1] + 66)
-        m3 = range_cut(-260, -15, -self.arm_pos[self.arm_ID][2] - 150)
-        m4 = range_cut(10, 195, -self.arm_pos[self.arm_ID][3] + 105)
-        m5 = range_cut(21, 292, self.arm_pos[self.arm_ID][4] + 166)
+        m1 = round(range_cut(11, 302, -self.arm_pos[self.arm_ID][0] + 168), 3)
+        m2 = round(range_cut(3, 150, -self.arm_pos[self.arm_ID][1] + 66), 3)
+        m3 = round(range_cut(-260, -15, -self.arm_pos[self.arm_ID][2] - 150), 3)
+        m4 = round(range_cut(10, 195, -self.arm_pos[self.arm_ID][3] + 105), 3)
+        m5 = round(range_cut(21, 292, self.arm_pos[self.arm_ID][4] + 166), 3)
         self.post_to_send_data(1, bytes(f'/arm:{self.arm_ID};{m1};{m2};{m3};{m4};{m5}^^^', encoding='utf-8'))
 
     def set_arm_vel(self, *args, **kwargs):
@@ -755,11 +783,11 @@ class YouBot:
         if list(kwargs.keys()).count("m5") > 0:
             self.arm_vel[self.arm_ID][4] = kwargs["m5"]
 
-        m1 = range_cut(-90, 90, self.arm_vel[self.arm_ID][0])
-        m2 = range_cut(-90, 90, self.arm_vel[self.arm_ID][1])
-        m3 = range_cut(-90, 90, self.arm_vel[self.arm_ID][2])
-        m4 = range_cut(-90, 90, self.arm_vel[self.arm_ID][3])
-        m5 = range_cut(-90, 90, self.arm_vel[self.arm_ID][4])
+        m1 = round(range_cut(-90, 90, self.arm_vel[self.arm_ID][0]), 3)
+        m2 = round(range_cut(-90, 90, self.arm_vel[self.arm_ID][1]), 3)
+        m3 = round(range_cut(-90, 90, self.arm_vel[self.arm_ID][2]), 3)
+        m4 = round(range_cut(-90, 90, self.arm_vel[self.arm_ID][3]), 3)
+        m5 = round(range_cut(-90, 90, self.arm_vel[self.arm_ID][4]), 3)
         self.post_to_send_data(1, bytes(f'/arm_vel:{self.arm_ID};{m1};{m2};{m3};{m4};{m5}^^^', encoding='utf-8'))
 
     # solve inverse kinetic
@@ -897,5 +925,3 @@ if __name__ == "__main__":
     robot = YouBot('192.168.88.21', ros=False, offline=False, camera_enable=True, advanced=False)
     print(robot.ssh.send_wait("echo 123", "root"))
     time.sleep(1)
-
-
