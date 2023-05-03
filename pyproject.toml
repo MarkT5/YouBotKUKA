@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "KUKA_youbot"
 version = "0.1.2"
-authors = ["ZaSKaR <mark.turkov@mail.ru>" ,
+authors = [{name = "ZaSKaR", email="mark.turkov@mail.ru"} ,
 ]
 
 dependencies = [
