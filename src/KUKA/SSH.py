@@ -13,7 +13,7 @@ class SshNotConnected(Exception):
 
 
 class SSH:
-    def __init__(self, /, user='youbot', ip="192.168.88.21", password=None, timeout=3, connect=True):
+    def __init__(self, /, user='youbot', ip="192.168.88.21", password=None, timeout=5, connect=True):
         """
         Connects to KUKA youbot via SSH client and starts ROS
         :param user: youbot by default
@@ -65,11 +65,15 @@ class SSH:
         while not msg.count(wait_msg):
             if self.ssh_var.recv_ready():
                 init_time = time.time()
-                read_char = self.ssh_var.recv(1).decode("utf-8")
-                if read_char != chr(0):
-                    msg += read_char
-                    if verbose:
-                        debug(read_char, end='')
+                ch = self.ssh_var.recv(1)
+                try:
+                    read_char = ch.decode("utf-8")
+                    if read_char != chr(0):
+                        msg += read_char
+                        if verbose:
+                            debug(read_char, end='')
+                except:
+                    pass
             else:
                 time.sleep(0.001)
             if time.time() - max_time_time > max_time:
@@ -115,7 +119,7 @@ class SSH:
         if rostopic.count("camera/rgb/image_raw"):
             camera_RGB = True
             if verbose:
-                debug("RGB camera is active")
+                debug("RGB camera topic is active")
             self.last_status['RGB'] = 1
         else:
             if verbose:
@@ -123,7 +127,7 @@ class SSH:
             self.last_status['RGB'] = 0
         if rostopic.count("camera/depth/image"):
             if verbose:
-                debug("depth camera is active")
+                debug("depth camera topic is active")
             self.last_status['depth'] = 1
             camera_depth = True
         else:
@@ -147,7 +151,7 @@ class SSH:
         ssh_msg = self.send_wait("roslaunch youbot_tl_test ytl_2arm.launch", "4rfdxc34rc3x", timeout=7, timeout_msg="",
                                  verbose=int(verbose-0.5))
         self.send_wait(chr(1) + chr(4), "root@youbot:", timeout_msg="", timeout=0.1)
-        self.send_wait("echo ZaSKaR was here", "root@youbot:", timeout_msg="SSH error, please restart", timeout=1)
+        self.send_wait("echo ZaSKaR was here", "root@youbot:", timeout_msg="SSH error, please restart\n", timeout=1)
         if ssh_msg.count("First ROS iter OK"):
             debug("ROS started\n")
         else:
